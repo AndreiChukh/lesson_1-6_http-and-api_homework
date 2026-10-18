@@ -322,3 +322,54 @@ textarea.field__control {
   }
 }
 
+
+.card__row {
+  display: grid;
+  gap: 3px;
+}
+
+.card__label {
+  font-weight: 700;
+}
+
+.card__value {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.entry-form__status {
+  margin: 0;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
+
+.entry-form__status[data-state="error"] {
+  color: var(--color-danger);
+}
+
+.entry-form__status[data-state="success"] {
+  color: var(--color-primary-dark);
+}
+
+
+.entry-form__actions {
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.card__actions .button {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.button--danger {
+  color: #ffffff;
+  background: var(--color-danger);
+}
