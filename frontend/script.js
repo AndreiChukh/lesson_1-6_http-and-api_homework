@@ -4,6 +4,9 @@
 
 const API_URL = "http://localhost:3000/books"
 
+const SEARCH_DELAY = 400
+const REQUEST_TIMEOUT = 5000
+
 const collection = document.querySelector('[data-ui="collection"]')
 const endpoint = document.querySelector('[data-ui="endpoint"]')
 const status = document.querySelector('[data-ui="status"]')
@@ -23,26 +26,45 @@ const titleInput = document.querySelector("#entry-title")
 const authorInput = document.querySelector("#entry-author")
 const genreSelect = document.querySelector("#entry-genre")
 const yearInput = document.querySelector("#entry-year")
+const searchInput = document.querySelector("#book-search")
 
 let editingBook = null
 let isBusy = false
+let isLoading = false
+
+let searchTimer = null
+let activeController = null
+let requestId = 0
 
 endpoint.textContent = API_URL
 
 function setBusy(value) {
   isBusy = value
 
-  reloadButton.disabled = value
-  submitButton.disabled = value
-  cancelButton.disabled = value
+  if (value) {
+    clearTimeout(searchTimer)
+    cancelBooksRequest()
+  }
+
+  updateControls()
+}
+
+function updateControls() {
+  const disabled = isBusy || isLoading
+
+  reloadButton.disabled = disabled
+  submitButton.disabled = disabled
+  cancelButton.disabled = disabled
 
   collection.querySelectorAll("button").forEach((button) => {
-    button.disabled = value
+    button.disabled = disabled
   })
 
   entryForm.querySelectorAll("input, select, textarea").forEach((field) => {
-    field.disabled = value
+    field.disabled = disabled
   })
+
+  searchInput.disabled = isBusy
 }
 
 function setListState(state, title, message) {
@@ -69,7 +91,7 @@ function resetEditor() {
 }
 
 function startEditing(book) {
-  if (isBusy) {
+  if (isBusy || isLoading) {
     return
   }
 
@@ -167,30 +189,116 @@ function renderBooks(books) {
   )
 }
 
+function cancelBooksRequest() {
+  requestId += 1
+
+  activeController?.abort()
+  activeController = null
+
+  isLoading = false
+  updateControls()
+}
+
 async function loadBooks() {
-  setBusy(true)
-  setListState("loading", "Загрузка", "Загружаем книги…")
+  clearTimeout(searchTimer)
+  cancelBooksRequest()
+
+  const currentRequestId = requestId
+  const controller = new AbortController()
+
+  activeController = controller
+
+  let timedOut = false
+
+  const url = new URL(API_URL)
+  const query = searchInput.value.trim()
+
+  if (query) {
+    url.searchParams.set("title:contains", query)
+  }
+
+  isLoading = true
+  updateControls()
+
+  setListState("loading", "Загрузка", "Загружаем книги")
+
+  const timeoutId = setTimeout(() => {
+    timedOut = true
+    controller.abort()
+  }, REQUEST_TIMEOUT)
 
   try {
-    const response = await fetch(API_URL)
+    const response = await fetch(url, {
+      signal: controller.signal
+    })
 
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      const error = new Error(`HTTP ${response.status}`)
+      error.status = response.status
+
+      throw error
     }
 
     const books = await response.json()
 
+    if (currentRequestId !== requestId) {
+      return
+    }
+
+    if (query && books.length === 0) {
+      collection.replaceChildren()
+
+      setListState(
+        "empty",
+        "Ничего не найдено",
+        "Попробуйте другое название."
+      )
+
+      return
+    }
+
     renderBooks(books)
   } catch (error) {
-    console.error("Не удалось загрузить книги:", error)
+    if (currentRequestId !== requestId) {
+      return
+    }
 
-    setListState(
-      "error",
-      "Ошибка загрузки",
-      "Не удалось загрузить каталог. Проверьте, что API запущен, и нажмите «Обновить»."
-    )
+    if (timedOut) {
+      setListState(
+        "error",
+        "Тайм-аут",
+        "Сервер не ответил за 5 секунд. Нажмите «Обновить»."
+      )
+    } else if (controller.signal.aborted) {
+      return
+    } else if (error.status === 404) {
+      setListState(
+        "error",
+        "Ошибка 404",
+        "Ресурс не найден. Проверьте адрес API."
+      )
+    } else if (error instanceof TypeError) {
+      setListState(
+        "error",
+        "Ошибка соединения",
+        "Не удалось связаться с API. Проверьте запуск backend и нажмите «Обновить»."
+      )
+    } else {
+      setListState(
+        "error",
+        "Ошибка загрузки",
+        `Не удалось загрузить каталог: ${error.message}`
+      )
+    }
   } finally {
-    setBusy(false)
+    clearTimeout(timeoutId)
+
+    if (currentRequestId === requestId) {
+      activeController = null
+      isLoading = false
+
+      updateControls()
+    }
   }
 }
 
@@ -217,7 +325,7 @@ async function saveBook(book, id = null) {
 async function submitBook(event) {
   event.preventDefault()
 
-  if (isBusy) {
+  if (isBusy || isLoading) {
     return
   }
 
@@ -253,7 +361,7 @@ async function submitBook(event) {
   }
 
   setBusy(true)
-  setSubmitState("loading", "Сохраняем книгу…")
+  setSubmitState("loading", "Сохраняем книгу")
 
   try {
     const savedBook = await saveBook(
@@ -284,7 +392,11 @@ async function submitBook(event) {
 }
 
 async function deleteBook(book) {
-  if (isBusy || !window.confirm(`Удалить книгу «${book.title}»?`)) {
+  if (isBusy || isLoading) {
+    return
+  }
+
+  if (!window.confirm(`Удалить книгу «${book.title}»?`)) {
     return
   }
 
@@ -321,7 +433,7 @@ async function deleteBook(book) {
 }
 
 reloadButton.addEventListener("click", () => {
-  if (!isBusy) {
+  if (!isBusy && !isLoading) {
     loadBooks()
   }
 })
@@ -329,13 +441,32 @@ reloadButton.addEventListener("click", () => {
 entryForm.addEventListener("submit", submitBook)
 
 cancelButton.addEventListener("click", () => {
-  if (isBusy) {
+  if (isBusy || isLoading) {
     return
   }
 
   resetEditor()
   setSubmitState("", "Редактирование отменено.")
   titleInput.focus()
+})
+
+searchInput.addEventListener("input", () => {
+  if (isBusy) {
+    return
+  }
+
+  clearTimeout(searchTimer)
+  cancelBooksRequest()
+
+  setListState(
+    "loading",
+    "Ожидание поиска",
+    "Поиск начнётся после паузы во вводе."
+  )
+
+  searchTimer = setTimeout(() => {
+    loadBooks()
+  }, SEARCH_DELAY)
 })
 
 loadBooks()
