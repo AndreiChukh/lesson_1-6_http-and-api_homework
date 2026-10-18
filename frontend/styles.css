@@ -322,3 +322,31 @@ textarea.field__control {
   }
 }
 
+
+.card__row {
+  display: grid;
+  gap: 3px;
+}
+
+.card__label {
+  font-weight: 700;
+}
+
+.card__value {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.entry-form__status {
+  margin: 0;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
+
+.entry-form__status[data-state="error"] {
+  color: var(--color-danger);
+}
+
+.entry-form__status[data-state="success"] {
+  color: var(--color-primary-dark);
+}
