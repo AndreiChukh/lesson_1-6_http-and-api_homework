@@ -12,11 +12,38 @@ const statusText = status.querySelector(".status__text")
 
 const reloadButton = document.querySelector('[data-action="reload"]')
 const submitButton = document.querySelector('[data-action="submit"]')
+const cancelButton = document.querySelector('[data-action="cancel-edit"]')
 
 const entryForm = document.querySelector('[data-form="entry"]')
+const formTitle = document.querySelector("#form-title")
+const formEyebrow = document.querySelector(".panel--form .panel__eyebrow")
 const submitStatus = document.querySelector('[data-ui="submit-status"]')
 
+const titleInput = document.querySelector("#entry-title")
+const authorInput = document.querySelector("#entry-author")
+const genreSelect = document.querySelector("#entry-genre")
+const yearInput = document.querySelector("#entry-year")
+
+let editingBook = null
+let isBusy = false
+
 endpoint.textContent = API_URL
+
+function setBusy(value) {
+  isBusy = value
+
+  reloadButton.disabled = value
+  submitButton.disabled = value
+  cancelButton.disabled = value
+
+  collection.querySelectorAll("button").forEach((button) => {
+    button.disabled = value
+  })
+
+  entryForm.querySelectorAll("input, select, textarea").forEach((field) => {
+    field.disabled = value
+  })
+}
 
 function setListState(state, title, message) {
   status.className = `status status--${state}`
@@ -24,6 +51,42 @@ function setListState(state, title, message) {
   statusText.textContent = message
 
   collection.hidden = state !== "success"
+}
+
+function setSubmitState(state, message) {
+  submitStatus.dataset.state = state
+  submitStatus.textContent = message
+}
+
+function resetEditor() {
+  editingBook = null
+  entryForm.reset()
+
+  formTitle.textContent = "Добавить книгу"
+  formEyebrow.textContent = "Новая книга"
+  submitButton.textContent = "Добавить книгу"
+  cancelButton.hidden = true
+}
+
+function startEditing(book) {
+  if (isBusy) {
+    return
+  }
+
+  editingBook = book
+
+  titleInput.value = book.title
+  authorInput.value = book.author
+  genreSelect.value = book.genre
+  yearInput.value = book.year
+
+  formTitle.textContent = "Редактировать книгу"
+  formEyebrow.textContent = "Редактирование"
+  submitButton.textContent = "Сохранить изменения"
+  cancelButton.hidden = false
+
+  setSubmitState("", "")
+  titleInput.focus()
 }
 
 function createBookCard(book) {
@@ -59,7 +122,23 @@ function createBookCard(book) {
     details.append(row)
   })
 
-  card.append(title, details)
+  const actions = document.createElement("div")
+  actions.className = "card__actions"
+
+  const editButton = document.createElement("button")
+  editButton.type = "button"
+  editButton.className = "button button--secondary"
+  editButton.textContent = "Редактировать"
+  editButton.addEventListener("click", () => startEditing(book))
+
+  const deleteButton = document.createElement("button")
+  deleteButton.type = "button"
+  deleteButton.className = "button button--danger"
+  deleteButton.textContent = "Удалить"
+  deleteButton.addEventListener("click", () => deleteBook(book))
+
+  actions.append(editButton, deleteButton)
+  card.append(title, details, actions)
 
   return card
 }
@@ -89,10 +168,8 @@ function renderBooks(books) {
 }
 
 async function loadBooks() {
+  setBusy(true)
   setListState("loading", "Загрузка", "Загружаем книги…")
-
-  reloadButton.disabled = true
-  submitButton.disabled = true
 
   try {
     const response = await fetch(API_URL)
@@ -113,14 +190,17 @@ async function loadBooks() {
       "Не удалось загрузить каталог. Проверьте, что API запущен, и нажмите «Обновить»."
     )
   } finally {
-    reloadButton.disabled = false
-    submitButton.disabled = false
+    setBusy(false)
   }
 }
 
-async function createBook(book) {
-  const response = await fetch(API_URL, {
-    method: "POST",
+async function saveBook(book, id = null) {
+  const url = id === null
+    ? API_URL
+    : `${API_URL}/${encodeURIComponent(id)}`
+
+  const response = await fetch(url, {
+    method: id === null ? "POST" : "PATCH",
     headers: {
       "Content-Type": "application/json"
     },
@@ -137,7 +217,7 @@ async function createBook(book) {
 async function submitBook(event) {
   event.preventDefault()
 
-  if (submitButton.disabled) {
+  if (isBusy) {
     return
   }
 
@@ -150,36 +230,112 @@ async function submitBook(event) {
     year: Number(formData.get("year"))
   }
 
-  submitButton.disabled = true
-  reloadButton.disabled = true
+  const isEditing = editingBook !== null
+  let payload = book
 
-  submitStatus.dataset.state = "loading"
-  submitStatus.textContent = "Сохраняем книгу"
+  if (isEditing) {
+    payload = {}
+
+    Object.keys(book).forEach((key) => {
+      if (book[key] !== editingBook[key]) {
+        payload[key] = book[key]
+      }
+    })
+
+    if (Object.keys(payload).length === 0) {
+      setSubmitState(
+        "",
+        "Измените данные или нажмите «Отменить редактирование»."
+      )
+
+      return
+    }
+  }
+
+  setBusy(true)
+  setSubmitState("loading", "Сохраняем книгу…")
 
   try {
-    const createdBook = await createBook(book)
+    const savedBook = await saveBook(
+      payload,
+      isEditing ? editingBook.id : null
+    )
 
-    console.log("Созданная книга:", createdBook)
+    console.log("Сохранённая книга:", savedBook)
 
-    entryForm.reset()
+    resetEditor()
 
-    submitStatus.dataset.state = "success"
-    submitStatus.textContent = "Книга добавлена в каталог."
+    setSubmitState(
+      "success",
+      isEditing ? "Изменения сохранены." : "Книга добавлена в каталог."
+    )
 
     await loadBooks()
   } catch (error) {
-    console.error("Не удалось добавить книгу:", error)
+    console.error("Не удалось сохранить книгу:", error)
 
-    submitStatus.dataset.state = "error"
-    submitStatus.textContent =
+    setSubmitState(
+      "error",
       "Не удалось сохранить книгу. Проверьте, что API запущен, и повторите отправку. Введённые данные сохранены в форме."
+    )
   } finally {
-    submitButton.disabled = false
-    reloadButton.disabled = false
+    setBusy(false)
   }
 }
 
-reloadButton.addEventListener("click", loadBooks)
+async function deleteBook(book) {
+  if (isBusy || !window.confirm(`Удалить книгу «${book.title}»?`)) {
+    return
+  }
+
+  setBusy(true)
+  setSubmitState("loading", "Удаляем книгу…")
+
+  try {
+    const response = await fetch(
+      `${API_URL}/${encodeURIComponent(book.id)}`,
+      { method: "DELETE" }
+    )
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`)
+    }
+
+    if (editingBook !== null && editingBook.id === book.id) {
+      resetEditor()
+    }
+
+    setSubmitState("success", "Книга удалена.")
+
+    await loadBooks()
+  } catch (error) {
+    console.error("Не удалось удалить книгу:", error)
+
+    setSubmitState(
+      "error",
+      "Не удалось удалить книгу. Проверьте, что API запущен, и повторите попытку."
+    )
+  } finally {
+    setBusy(false)
+  }
+}
+
+reloadButton.addEventListener("click", () => {
+  if (!isBusy) {
+    loadBooks()
+  }
+})
+
 entryForm.addEventListener("submit", submitBook)
+
+cancelButton.addEventListener("click", () => {
+  if (isBusy) {
+    return
+  }
+
+  resetEditor()
+  setSubmitState("", "Редактирование отменено.")
+  titleInput.focus()
+})
 
 loadBooks()

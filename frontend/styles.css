@@ -350,3 +350,26 @@ textarea.field__control {
 .entry-form__status[data-state="success"] {
   color: var(--color-primary-dark);
 }
+
+
+.entry-form__actions {
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.card__actions .button {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.button--danger {
+  color: #ffffff;
+  background: var(--color-danger);
+}
